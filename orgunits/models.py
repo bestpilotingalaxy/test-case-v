@@ -11,50 +11,52 @@ class OrganizationQuerySet(models.QuerySet):
     def tree_downwards(self, root_org_id):
         """
         Возвращает корневую организацию с запрашиваемым root_org_id и всех её детей любого уровня вложенности.
-        Реализован алгоритм поиска в ширину, создается множество посещенных узлов <children> и обьект очереди <queue>.
-        Для каждого обьекта в <queue> происходит поиск детей по его id.
-        Если обьект не входит во множество посещенных, он туда добавляется и попадает в очередь <queue>.
-        Происходит итерация цикла со смещением по очереди, пока она не закончится.
+        Рекурсивный запрос с помощью RaqSQL, в рамках тестов на оптимизацию.
         """
-        children, queue = set(), collections.deque([root_org_id])
-        children.add(root_org_id)
-        
-        while queue:
-            # смещение очереди
-            vertex = queue.popleft()
-            
-            new_children = Organization.objects.filter(parent_id=vertex) 
-            for child in new_children:
-                if child.id not in children:
-                    children.add(child.id)
-                    queue.append(child.id)     
-        
-        return self.filter(id__in=children)
+        raw_query = RawSQL(
+            """
+            WITH RECURSIVE children AS (
+                
+                SELECT id
+                FROM orgunits_organization
+                WHERE id = %s
+              
+              UNION ALL
+                
+                SELECT o.id
+                FROM orgunits_organization  o, children  c
+                WHERE o.parent_id = c.id
+            )
+            SELECT id FROM children
+            """,
+            [root_org_id]
+        )
+        return self.filter(id__in=raw_query)
 
     def tree_upwards(self, child_org_id):
         """
-        Возвращает корневую организацию с запрашиваемым child_org_id и всех её родителей любого уровня вложенности
-        Реализован алгоритм схожий с .tree_downwards(). Происходит дополнительная проверка на наличие родителей.
-        Родительские обьекты не обрабатываются циклом, т. к. у экземпляра Organization может быть только один родитель. 
+        Возвращает корневую организацию с запрашиваемым child_org_id и всех её родителей любого уровня вложенности.
+        Рекурсивный запрос с помощью RaqSQL, в рамках тестов на оптимизацию.
         """
-        parents, queue = set(), collections.deque([child_org_id])
-        parents.add(child_org_id)
-        
-        while queue:
-            vertex = queue.popleft()
-            instance = Organization.objects.get(id=vertex)
-            
-            # Проверка на наличие родителей
-            try:
-                parent_id = instance.parent.id
-            except AttributeError:
-                continue
-            
-            if parent_id not in parents:
-                parents.add(parent_id)
-                queue.append(parent_id)
-        
-        return self.filter(id__in=parents)
+        raw_query = RawSQL(
+            """
+            WITH RECURSIVE parents AS (
+                
+                SELECT id, parent_id
+                FROM orgunits_organization
+                WHERE id = %s
+              
+              UNION ALL
+                
+                SELECT o.id, o.parent_id
+                FROM orgunits_organization  o, parents  p
+                WHERE o.id = p.parent_id
+            )
+            SELECT id FROM parents
+            """,
+            [child_org_id]
+        )
+        return self.filter(id__in=raw_query)
 
 
 class Organization(models.Model):
