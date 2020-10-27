@@ -17,3 +17,6 @@ venv.bak/
 
 # Database
 db.sqlite3
+
+# Python trash
+__pycache__
